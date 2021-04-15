@@ -4,13 +4,16 @@ from tkinter import messagebox
 
 window1 = tk.Tk()
 window1.geometry("800x225")
+window1.title('Pharmaceutical Store')
 
 loginFrame = tk.Frame()
 frameTransit = tk.Frame()
 transactionFrame = tk.Frame()
+billFrame = tk.Frame()
 addEmplFrame = tk.Frame()
 removeEmplFrame = tk.Frame()
 inventoryFrame = tk.Frame()
+checkoutFrame = tk.Frame()
 
 conn = psycopg2.connect("dbname=pharma user=postgres password=tiger")
 cur = conn.cursor()
@@ -27,19 +30,18 @@ tk.Label(loginFrame,text="Password:").grid(row=1,column=0)
 txtPassword = tk.Entry(loginFrame,show="*")
 txtPassword.grid(row=1,column=1)
 
-
 def login():
+    global emplID
     emplID=str(txtUsername.get())
-    sql="SELECT*FROM employee where employee_id=%s;"
-    cur.execute(sql,(str(emplID),))
+    cur.callproc('get_empl',[emplID,])
     row=cur.fetchone()
     if row is None:
         txtUsername.delete(0,20)
         txtPassword.delete(0,20)
-        tk.messagebox.showwarning(message="Invalid LoginID/Password")
+        tk.messagebox.showwarning(message="Invalid Login ID/Password")
     global emplType    
-    emplType=str(row[4]).lower()
-    password=str(row[6])
+    emplType=str(row[1]).lower()
+    password=str(row[0])
     
     if password==txtPassword.get():
         txtUsername.delete(0,20)
@@ -90,92 +92,357 @@ def displayremoveEmplButtonPage():
     frameTransit.pack_forget()
     removeEmplFrame.pack()
 
+def displayInventoryPage():
+    addEmplButton.pack_forget()
+    removeEmplButton.pack_forget()
+    frameTransit.pack_forget()
+    inventoryFrame.pack()
+
 addEmplButton=tk.Button(text="Add an Employee",command=displayaddEmplButtonPage)
 removeEmplButton=tk.Button(text="Remove an Employee",command=displayremoveEmplButtonPage)
-tk.Button(frameTransit,text="Check Inventory/Add Stock").grid(row=1,column=0)
+tk.Button(frameTransit,text="Check Inventory/Add Stock",command=displayInventoryPage).grid(row=1,column=0)
 buttNewPurchase= tk.Button(frameTransit,text="New Purchase",command=displayBillPage)
 buttNewPurchase.grid(row=2,column=0)
 buttLogout=tk.Button(frameTransit,text="Logout",command=logout)
 buttLogout.grid(row=3,column=0)
 
-#-------------------- end of framTransit ##################################################
+#-------------------- end of frameTransit ##################################################
 
 ##################### Inventory page ######################################################
+def goBackFromInventory():
+    stockEntry.delete(0,'end')
+    qtyEntry.delete(0,'end')
+    inventoryFrame.pack_forget()
+    if emplType=='manager':
+        addEmplButton.pack()
+        removeEmplButton.pack()
+    frameTransit.pack()
+def getQTY():
+    drugID=stockEntry.get()
+    cur.callproc('get_stock',[drugID,])
+    qty=cur.fetchone()
+    qtyEntry.delete(0,'end')
+    qtyEntry.insert(0,str(qty[0]))
+def addStock():
+    drugID=addStockEntry.get()
+    qty=int(addQtyEntry.get())
+    cur.callproc('add_stock',[drugID,qty,])
+    conn.commit()
+    tk.messagebox.showwarning(message="Added successfully...")
+    addStockEntry.delete(0,'end')
+    addQtyEntry.delete(0,'end')
 
+tk.Label(inventoryFrame,text='Check stock').grid(row=0,column=0)
+tk.Label(inventoryFrame,text='Stock ID:').grid(row=1,column=0)
+stockEntry=tk.Entry(inventoryFrame)
+stockEntry.grid(row=1,column=1)
+tk.Button(inventoryFrame,text='Check Quantity',command=getQTY).grid(row=1,column=2)
+qtyEntry=tk.Entry(inventoryFrame)
+qtyEntry.grid(row=1,column=3)
+
+tk.Label(inventoryFrame,text='Add stock').grid(row=2,column=0)
+tk.Label(inventoryFrame,text='Stock ID:').grid(row=3,column=0)
+addStockEntry=tk.Entry(inventoryFrame)
+addStockEntry.grid(row=3,column=1)
+tk.Label(inventoryFrame,text='Enter quantity:').grid(row=4,column=0)
+addQtyEntry=tk.Entry(inventoryFrame)
+addQtyEntry.grid(row=4,column=1)
+tk.Button(inventoryFrame,text="Add to Stock",command=addStock).grid(row=5,column=1)
+tk.Button(inventoryFrame,text="Back",command=goBackFromInventory).grid(row=5,column=2)
 
 #--------------------end of Inventory page ################################################
 
 #################### billPage (transactionFrame) #########################################
-def cancel():
+transactionId=0
+drug=['','','','']
+drugName=['','','','']
+qty=[0,0,0,0]
+price=[0,0,0,0]
+totalAmt=0
+def displayTotalAmt():
+    global price, totalAmt
+    totalAmt=price[0]+price[1]+price[2]+price[3]
+    amountEntry.delete(0,'end')
+    amountEntry.insert(0,str(totalAmt))
+
+def checkout():
+    global drug,qty,price,transactionId,totalAmt  
+    i=0
+    purchaseId=0
+    for i in range(4):
+        if drug[i]=='':
+            break
+
+        cur.execute('select max(purchase_Id) from purchase')
+        row=cur.fetchone()
+        purchaseId=int(row[0])+1
+        cur.callproc('insert_purchase',[purchaseId,transactionId,drug[i],qty[i],])
+        conn.commit()
+        
+    cur.callproc('finish_transaction',[transactionId,totalAmt,])
+    conn.commit()
     transactionFrame.pack_forget()
+    billFrame.pack_forget()
+    phoneEntry.delete(0,'end')
+    rateEntry1.delete(0,'end')
+    qtyEntry1.delete(0,'end')
+    rateEntry2.delete(0,'end')
+    qtyEntry2.delete(0,'end')
+    rateEntry3.delete(0,'end')
+    qtyEntry3.delete(0,'end')
+    rateEntry4.delete(0,'end')
+    qtyEntry4.delete(0,'end')
+    checkoutFrame.pack()
+
+def cancel():
+    global transactionId, drug, drugName, qty, price, totalAmt 
+    cur.callproc('terminate_transaction',[transactionId,])
+    conn.commit()
+    transactionId=0
+    transactionFrame.pack_forget()
+    billFrame.pack_forget()
+    phoneEntry.delete(0,'end')
+    rateEntry1.delete(0,'end')
+    qtyEntry1.delete(0,'end')
+    rateEntry2.delete(0,'end')
+    qtyEntry2.delete(0,'end')
+    rateEntry3.delete(0,'end')
+    qtyEntry3.delete(0,'end')
+    rateEntry4.delete(0,'end')
+    qtyEntry4.delete(0,'end')
+    transactionId=0
+    drug=['','','','']
+    drugName=['','','','']
+    qty=[0,0,0,0]
+    price=[0,0,0,0]
+    totalAmt=0
     if emplType=='manager':
         addEmplButton.pack()
         removeEmplButton.pack()
     frameTransit.pack()
 
+def createBill():
+    phoneNo=phoneEntry.get()
+    global transactionId
+    cur.execute('select max(transaction_id) from transaction')
+    row=cur.fetchone()
+    transactionId=int(row[0])+1
+    global emplID
+    if phoneNo=="":
+        tk.messagebox.showwarning(message="Enter Valid Phone Number")
+    else:
+        billFrame.pack()
+        cur.callproc('create_transaction',[transactionId,emplID,phoneNo,])
+        conn.commit()
+        amountEntry.delete(0,'end')
+        amountEntry.insert(0,'0')
+
+def add0():
+    global drug, qty, price, drugName   
+    drug[0]=drugEntry1.get()
+    qty[0]=int(qtyEntry1.get())
+    cur.callproc('get_stock',[drug[0],])
+    row=cur.fetchone()
+    if row[0]<qty[0]:          
+        tk.messagebox.showwarning(message="Stock Unavailable")
+    else:
+        drugName[0]=row[2]
+        price[0]=qty[0]*row[1]
+        rateEntry1.delete(0,'end')
+        rateEntry1.insert(0,str(row[1]))
+        priceEntry1.delete(0,'end')
+        priceEntry1.insert(0,str(price[0]))
+        displayTotalAmt()
+        
+def remove0():
+    global drug, qty, price 
+    drug[0]=''
+    drugName[0]=''
+    qty[0]=0
+    price[0]=0
+    displayTotalAmt()
+    rateEntry1.delete(0,'end')
+    priceEntry1.delete(0,'end')
+
+def add1():
+    global drug, qty, price  
+    drug[1]=drugEntry2.get()
+    qty[1]=int(qtyEntry2.get())
+    cur.callproc('get_stock',[drug[1],])
+    row=cur.fetchone()
+    if row[0]<qty[1]:          
+        tk.messagebox.showwarning(message="Stock Unavailable")
+    else:
+        drugName[1]=row[2]
+        price[1]=qty[1]*row[1]
+        rateEntry2.delete(0,'end')
+        rateEntry2.insert(0,str(row[1]))
+        priceEntry2.delete(0,'end')
+        priceEntry2.insert(0,str(price[1]))
+        displayTotalAmt()
+        
+def remove1():
+    global drug, qty, price 
+    drug[1]=''
+    drugName[1]=''
+    qty[1]=0
+    price[1]=0
+    displayTotalAmt()
+    rateEntry2.delete(0,'end')
+    priceEntry2.delete(0,'end')
+
+def add2():
+    global drug, qty, price  
+    drug[2]=drugEntry3.get()
+    qty[2]=int(qtyEntry3.get())
+    cur.callproc('get_stock',[drug[2],])
+    row=cur.fetchone()
+    if row[0]<qty[2]:          
+        tk.messagebox.showwarning(message="Stock Unavailable")
+    else:
+        drugName[2]=row[2]
+        price[2]=qty[2]*row[1]
+        rateEntry3.delete(0,'end')
+        rateEntry3.insert(0,str(row[1]))
+        priceEntry3.delete(0,'end')
+        priceEntry3.insert(0,str(price[2]))
+        displayTotalAmt()
+        
+def remove2():
+    global drug, qty, price 
+    drug[2]=''
+    drugName[2]=''
+    qty[2]=0
+    price[2]=0
+    displayTotalAmt()
+    rateEntry3.delete(0,'end')
+    priceEntry3.delete(0,'end')
+
+def add3():
+    global drug, qty, price  
+    drug[3]=drugEntry4.get()
+    qty[3]=int(qtyEntry4.get())
+    cur.callproc('get_stock',[drug[3],])
+    row=cur.fetchone()
+    if row[0]<qty[3]:          
+        tk.messagebox.showwarning(message="Stock Unavailable")
+    else:
+        drugName[3]=row[2]
+        price[3]=qty[3]*row[1]
+        rateEntry4.delete(0,'end')
+        rateEntry4.insert(0,str(row[1]))
+        priceEntry4.delete(0,'end')
+        priceEntry4.insert(0,str(price[3]))
+        displayTotalAmt()
+        
+def remove3():
+    global drug, qty, price 
+    drug[3]=''
+    drugName[3]=''
+    qty[3]=0
+    price[3]=0
+    displayTotalAmt()
+    rateEntry4.delete(0,'end')
+    priceEntry4.delete(0,'end')
+    
+
 tk.Label(transactionFrame,text="Customer Phone Number").grid(row=0,column=0)
 phoneEntry=tk.Entry(transactionFrame)
 phoneEntry.grid(row=0,column=1)
+tk.Button(transactionFrame,text="Create bill",command=createBill).grid(row=0,column=2)
 
-tk.Label(transactionFrame,text="DrugID").grid(row=1,column=0)
-tk.Label(transactionFrame,text="Quantity").grid(row=1,column=1)
+tk.Label(billFrame,text="DrugID").grid(row=1,column=0)
+tk.Label(billFrame,text="Quantity").grid(row=1,column=1)
 
-tk.Label(transactionFrame,text="Rate").grid(row=1,column=3)
-tk.Label(transactionFrame,text="Price").grid(row=1,column=4)
+tk.Label(billFrame,text="Rate").grid(row=1,column=3)
+tk.Label(billFrame,text="Price").grid(row=1,column=4)
 
-drugEntry1=tk.Entry(transactionFrame)
+drugEntry1=tk.Entry(billFrame)
 drugEntry1.grid(row=2,column=0)
-qtyEntry1=tk.Entry(transactionFrame)
+qtyEntry1=tk.Entry(billFrame)
 qtyEntry1.grid(row=2,column=1)
-tk.Button(transactionFrame,text="Add to bill").grid(row=2,column=2)
-rateEntry1=tk.Entry(transactionFrame)
+tk.Button(billFrame,text="Add to bill",command=add0).grid(row=2,column=2)
+rateEntry1=tk.Entry(billFrame)
 rateEntry1.grid(row=2,column=3)
-priceEntry1=tk.Entry(transactionFrame)
+priceEntry1=tk.Entry(billFrame)
 priceEntry1.grid(row=2,column=4)
-tk.Button(transactionFrame,text="Remove item").grid(row=2,column=5)
+tk.Button(billFrame,text="Remove item",command=remove0).grid(row=2,column=5)
 
-drugEntry2=tk.Entry(transactionFrame)
+drugEntry2=tk.Entry(billFrame)
 drugEntry2.grid(row=3,column=0)
-qtyEntry2=tk.Entry(transactionFrame)
+qtyEntry2=tk.Entry(billFrame)
 qtyEntry2.grid(row=3,column=1)
-tk.Button(transactionFrame,text="Add to bill").grid(row=3,column=2)
-rateEntry2=tk.Entry(transactionFrame)
+tk.Button(billFrame,text="Add to bill",command=add1).grid(row=3,column=2)
+rateEntry2=tk.Entry(billFrame)
 rateEntry2.grid(row=3,column=3)
-priceEntry2=tk.Entry(transactionFrame)
+priceEntry2=tk.Entry(billFrame)
 priceEntry2.grid(row=3,column=4)
-tk.Button(transactionFrame,text="Remove item").grid(row=3,column=5)
+tk.Button(billFrame,text="Remove item",command=remove1).grid(row=3,column=5)
 
-drugEntry3=tk.Entry(transactionFrame)
+drugEntry3=tk.Entry(billFrame)
 drugEntry3.grid(row=4,column=0)
-qtyEntry3=tk.Entry(transactionFrame)
+qtyEntry3=tk.Entry(billFrame)
 qtyEntry3.grid(row=4,column=1)
-tk.Button(transactionFrame,text="Add to bill").grid(row=4,column=2)
-rateEntry3=tk.Entry(transactionFrame)
+tk.Button(billFrame,text="Add to bill",command=add2).grid(row=4,column=2)
+rateEntry3=tk.Entry(billFrame)
 rateEntry3.grid(row=4,column=3)
-priceEntry3=tk.Entry(transactionFrame)
+priceEntry3=tk.Entry(billFrame)
 priceEntry3.grid(row=4,column=4)
-tk.Button(transactionFrame,text="Remove item").grid(row=4,column=5)
+tk.Button(billFrame,text="Remove item",command=remove2).grid(row=4,column=5)
 
-drugEntry4=tk.Entry(transactionFrame)
+drugEntry4=tk.Entry(billFrame)
 drugEntry4.grid(row=5,column=0)
-qtyEntry4=tk.Entry(transactionFrame)
+qtyEntry4=tk.Entry(billFrame)
 qtyEntry4.grid(row=5,column=1)
-tk.Button(transactionFrame,text="Add to bill").grid(row=5,column=2)
-rateEntry4=tk.Entry(transactionFrame)
+tk.Button(billFrame,text="Add to bill",command=add3).grid(row=5,column=2)
+rateEntry4=tk.Entry(billFrame)
 rateEntry4.grid(row=5,column=3)
-priceEntry4=tk.Entry(transactionFrame)
+priceEntry4=tk.Entry(billFrame)
 priceEntry4.grid(row=5,column=4)
-tk.Button(transactionFrame,text="Remove item").grid(row=5,column=5)
+tk.Button(billFrame,text="Remove item",command=remove3).grid(row=5,column=5)
 
-tk.Label(transactionFrame,text="Total bill").grid(row=6,column=2)
-amountEntry=tk.Entry(transactionFrame)
+tk.Label(billFrame,text="Total bill").grid(row=6,column=2)
+amountEntry=tk.Entry(billFrame)
 amountEntry.grid(row=6,column=3)
 
-tk.Button(transactionFrame,text="Checkout").grid(row=7,column=1)
-tk.Button(transactionFrame,text="Cancel",command=cancel).grid(row=7,column=3)
+tk.Button(billFrame,text="Checkout",command=checkout).grid(row=7,column=1)
+tk.Button(billFrame,text="Cancel",command=cancel).grid(row=7,column=3)
 
 #------------------------- end bill page ############################################################
 
+######################### checkout page #############################################################
+def dispBill():
+    textArea.pack()
+    backButton.pack()
+    for i in range(4):
+        if drug[i]=='':
+            break
+        item='\n'+drugName[i]+'\t QTY: '+str(qty[i])+'\t Price: '+str(price[i])
+        textArea.insert(tk.END, item)
+    amountLine='\n'+'Total amount: '+str(totalAmt)     
+    textArea.insert(tk.END, amountLine) 
+
+def backToMenu():
+    global transactionId,drug,drugName,qty,price,totalAmt
+    textArea.pack_forget()
+    checkoutFrame.pack_forget()
+    backButton.pack_forget()
+    transactionId=0
+    drug=['','','','']
+    drugName=['','','','']
+    qty=[0,0,0,0]
+    price=[0,0,0,0]
+    totalAmt=0
+    if emplType=='manager':
+        addEmplButton.pack()
+        removeEmplButton.pack()
+    frameTransit.pack()
+
+tk.Button(checkoutFrame,text="Generate Reciept",command=dispBill).grid(row=0,column=0)
+textArea=tk.Text(height=10,width=75)
+backButton=tk.Button(text="Back to menu",command=backToMenu)
+
+#-------------------- end checkout page #############################################################
 
 ######################### add empl page ############################################################
 def goBackFromaddEmplButton():
@@ -187,9 +454,7 @@ def goBackFromaddEmplButton():
 
 def addEmpl():
     try:
-        data=(loginId.get(),fname.get(),lname.get(),phNo.get(),job.get(),salary.get(),loginPassword.get())
-        sql="insert into employee values(%s,%s,%s,%s,%s,%s,%s);"
-        cur.execute(sql,data)
+        cur.callproc('add_empl',[loginId.get(),fname.get(),lname.get(),phNo.get(),job.get(),int(salary.get()),loginPassword.get(),])
         conn.commit()
         tk.messagebox.showwarning(message="Success!")
         fname.delete(0,20)
@@ -199,8 +464,10 @@ def addEmpl():
         salary.delete(0,20)
         loginId.delete(0,20)
         loginPassword.delete(0,20)
+        
     except:
-        tk.messagebox.showwarning(message="Error!")
+        for notice in conn.notices:
+            tk.messagebox.showwarning(message=notice)
         conn.commit()
         
 
@@ -247,15 +514,13 @@ def goBackFromRemoveEmplPage():
     frameTransit.pack()
 
 def removeEmpl():
-    sql="SELECT*FROM employee where employee_id=%s"
-    cur.execute(sql,(str(removalID.get()),))
+    cur.callproc('get_empl',[removalID.get(),])
     row=cur.fetchone()
     if row is None:
         tk.messagebox.showwarning(message="No such Employee exists!")
         removalID.delete(0,20)
     else:
-        sql="DELETE FROM employee where employee_id=%s"
-        cur.execute(sql,(str(removalID.get()),))
+        cur.callproc('remove_empl',[removalID.get(),])
         conn.commit()
         tk.messagebox.showwarning(message="Success!")
         removalID.delete(0,20)
@@ -270,4 +535,7 @@ tk.Button(removeEmplFrame,text="Back",command=goBackFromRemoveEmplPage).grid(row
 
 
 window1.mainloop()
+
+cur.close()
+conn.close()
 
